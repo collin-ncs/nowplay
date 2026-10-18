@@ -1,0 +1,690 @@
+<!doctype html>
+<!--
+  Nowplay – Spotify-Display für alte Smartphones
+  https://github.com/DEINNAME/nowplay
+  MIT License
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Nowplay</title>
+<style>
+:root{
+  --fg:#fff; --dim:rgba(255,255,255,.62); --faint:rgba(255,255,255,.16);
+  --accent:#1db954; --tint:40,40,40;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:#000;color:var(--fg);overflow:hidden;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;touch-action:manipulation}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+svg{display:block}
+.screen{position:fixed;inset:0;display:none}
+.screen.active{display:flex}
+
+/* ---------- Hintergrund (Farbe aus dem Cover) ---------- */
+#backdrop{position:fixed;inset:0;background-color:rgb(var(--tint));transition:background-color 1.4s ease}
+#backdrop::after{content:"";position:absolute;inset:0;
+  background:radial-gradient(130% 110% at 15% 40%,rgba(0,0,0,.15) 0%,rgba(0,0,0,.65) 55%,#000 100%)}
+
+/* ---------- Player ---------- */
+#player{user-select:none;-webkit-user-select:none}
+#shift{position:relative;display:flex;align-items:center;gap:5vw;width:100%;height:100%;
+  padding:6vh max(6vw,env(safe-area-inset-left)) 6vh max(6vw,env(safe-area-inset-right));transition:transform 3s ease}
+#cover{height:min(80vh,44vw);aspect-ratio:1/1;flex:none;border-radius:16px;background:#1a1a1a center/cover no-repeat;
+  box-shadow:0 24px 70px rgba(0,0,0,.65);transition:transform .28s ease,opacity .28s ease}
+#cover.out-left{transform:translateX(-14%);opacity:0}
+#cover.out-right{transform:translateX(14%);opacity:0}
+#info{flex:1;min-width:0;height:min(80vh,44vw);display:flex;flex-direction:column;justify-content:center;gap:2.4vh}
+#title{font-size:clamp(22px,5.4vh + .8vw,54px);font-weight:800;line-height:1.08;letter-spacing:-.01em;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#artist{font-size:clamp(16px,3.8vh,30px);color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#album{font-size:clamp(12px,2.4vh,18px);color:rgba(255,255,255,.4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:-1.4vh}
+.prog{padding:10px 0;cursor:pointer}
+.bar{height:6px;border-radius:3px;background:var(--faint);overflow:hidden}
+.fill{height:100%;width:0;background:#fff;border-radius:3px}
+.times{display:flex;justify-content:space-between;margin-top:8px;font-size:13px;color:var(--dim);font-variant-numeric:tabular-nums}
+.controls{display:flex;align-items:center;justify-content:space-between;max-width:520px;width:100%}
+.ctl{width:56px;height:56px;display:grid;place-items:center;border-radius:50%;position:relative}
+.ctl:active{background:rgba(255,255,255,.1)}
+.ctl svg{width:34px;height:34px}
+.ctl.small svg{width:24px;height:24px;opacity:.55}
+.ctl.on svg{opacity:1;color:var(--accent)}
+.ctl .one{position:absolute;font-size:9px;font-weight:800;color:var(--accent);top:12px;right:12px;display:none}
+.ctl.track .one{display:block}
+#play{width:76px;height:76px;border-radius:50%;background:#fff;color:#000;display:grid;place-items:center;
+  box-shadow:0 8px 24px rgba(0,0,0,.35);transition:transform .12s}
+#play:active{transform:scale(.93)}
+#play svg{width:34px;height:34px}
+.bottom{display:flex;align-items:center;gap:10px}
+#deviceBtn{display:inline-flex;align-items:center;gap:8px;max-width:100%;font-size:14px;color:var(--dim);
+  padding:8px 14px;border-radius:999px;background:rgba(255,255,255,.08)}
+#deviceBtn svg{width:18px;height:18px;flex:none}
+#deviceBtn span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#empty{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;
+  text-align:center;padding:24px;background:#000}
+#empty.show{display:flex}
+#empty h2{font-size:26px;font-weight:700}
+#empty p{color:var(--dim);max-width:460px;line-height:1.45}
+.pill{padding:12px 22px;border-radius:999px;background:#fff;color:#000;font-weight:700}
+.pill.ghost{background:rgba(255,255,255,.1);color:#fff}
+#moreBtn{position:absolute;top:14px;right:14px;width:44px;height:44px;display:grid;place-items:center;opacity:.28;z-index:5}
+#moreBtn svg{width:22px;height:22px}
+
+@media (orientation:portrait){
+  #shift{flex-direction:column;justify-content:center;gap:5vh}
+  #cover{height:auto;width:min(82vw,48vh)}
+  #info{height:auto;width:100%;flex:none}
+}
+
+/* ---------- Ruhemodus (Einbrennschutz) ---------- */
+#idle{background:#000;z-index:20;cursor:none}
+#clockWrap{position:absolute;left:0;top:0;transition:transform 2.5s ease;text-align:center}
+#clock{font-size:20vh;font-weight:200;line-height:1;color:rgba(255,255,255,.32);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+#date{font-size:3.4vh;color:rgba(255,255,255,.2);margin-top:1.5vh}
+#idle.deep #clockWrap{display:none}
+
+/* ---------- Setup ---------- */
+#setup{z-index:30;background:#0b0b0b;overflow-y:auto;align-items:flex-start;justify-content:center;user-select:text;-webkit-user-select:text}
+.card{width:min(640px,100%);padding:32px 20px 48px;display:flex;flex-direction:column;gap:18px}
+.card h1{font-size:30px;font-weight:800}
+.card p,.card li{color:var(--dim);line-height:1.5;font-size:15px}
+.card ol{padding-left:20px;display:flex;flex-direction:column;gap:6px}
+.card label{font-size:13px;color:var(--dim);display:block;margin-bottom:6px}
+.card input{width:100%;padding:14px;border-radius:10px;border:1px solid #333;background:#151515;color:#fff;font:15px ui-monospace,monospace}
+.uri{display:flex;gap:8px;align-items:stretch}
+.uri code{flex:1;min-width:0;padding:12px;border-radius:10px;background:#151515;border:1px solid #333;font:13px ui-monospace,monospace;word-break:break-all;color:#fff}
+.uri button{padding:0 14px;border-radius:10px;background:#222;font-size:14px}
+#setupMsg{color:#ff8a80;font-size:14px;min-height:1em}
+#connectBtn{align-self:flex-start;background:var(--accent);color:#000}
+
+/* ---------- Bottom-Sheet (Geräte, Lautstärke) ---------- */
+#sheet{position:fixed;inset:0;z-index:25;display:none;background:rgba(0,0,0,.6);align-items:flex-end;justify-content:center}
+#sheet.open{display:flex}
+.panel{width:min(620px,100%);max-height:88vh;overflow-y:auto;background:#161616;border-radius:22px 22px 0 0;padding:20px 20px 28px;
+  display:flex;flex-direction:column;gap:14px;animation:up .22s ease}
+@keyframes up{from{transform:translateY(30px);opacity:0}}
+.panel h3{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim)}
+.dev{display:flex;align-items:center;gap:14px;padding:12px;border-radius:12px;text-align:left;width:100%}
+.dev:active{background:rgba(255,255,255,.06)}
+.dev svg{width:24px;height:24px;flex:none;opacity:.8}
+.dev.active{color:var(--accent)}
+.dev small{display:block;color:var(--dim);font-size:12px}
+.vol{display:flex;align-items:center;gap:12px}
+.vol input{flex:1;accent-color:#fff;height:28px}
+.vol span{width:44px;text-align:right;font-variant-numeric:tabular-nums;color:var(--dim)}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+
+/* ---------- Toast ---------- */
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;z-index:40;
+  background:rgba(30,30,30,.95);padding:10px 18px;border-radius:999px;font-size:14px;transition:all .25s;pointer-events:none;white-space:nowrap}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+
+<div id="backdrop"></div>
+
+<!-- ================= PLAYER ================= -->
+<div id="player" class="screen">
+  <button id="moreBtn" aria-label="Menü"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+  <div id="shift">
+    <div id="cover"></div>
+    <div id="info">
+      <div id="title">–</div>
+      <div id="artist"></div>
+      <div id="album"></div>
+      <div class="prog" id="prog">
+        <div class="bar"><div class="fill" id="fill"></div></div>
+        <div class="times"><span id="tCur">0:00</span><span id="tDur">0:00</span></div>
+      </div>
+      <div class="controls">
+        <button class="ctl small" id="shuffleBtn" aria-label="Zufall"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg></button>
+        <button class="ctl" id="prevBtn" aria-label="Zurück"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="2.5" height="14" rx="1"/><path d="M19 6.2v11.6a1 1 0 0 1-1.5.86L8.5 13a1.15 1.15 0 0 1 0-2l9-5.66A1 1 0 0 1 19 6.2z"/></svg></button>
+        <button id="play" aria-label="Play/Pause"><svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"></svg></button>
+        <button class="ctl" id="nextBtn" aria-label="Weiter"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 6.2v11.6a1 1 0 0 0 1.5.86L15.5 13a1.15 1.15 0 0 0 0-2L6.5 5.34A1 1 0 0 0 5 6.2z"/><rect x="16.5" y="5" width="2.5" height="14" rx="1"/></svg></button>
+        <button class="ctl small" id="repeatBtn" aria-label="Wiederholen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"/></svg><span class="one">1</span></button>
+      </div>
+      <div class="bottom">
+        <button id="deviceBtn"><svg id="deviceIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></svg><span id="deviceName">Gerät wählen</span></button>
+      </div>
+    </div>
+  </div>
+  <div id="empty">
+    <h2>Gerade läuft nichts</h2>
+    <p>Starte Spotify auf deinem PC, Mac oder Lautsprecher, oder wähle hier ein Gerät aus.</p>
+    <button class="pill" id="emptyDevBtn">Gerät wählen</button>
+  </div>
+</div>
+
+<!-- ================= RUHEMODUS ================= -->
+<div id="idle" class="screen">
+  <div id="clockWrap"><div id="clock">00:00</div><div id="date"></div></div>
+</div>
+
+<!-- ================= SETUP ================= -->
+<div id="setup" class="screen">
+  <div class="card">
+    <h1>Nowplay einrichten</h1>
+    <p id="secureWarn" style="display:none;color:#ff8a80">Diese Seite läuft nicht über HTTPS. Die Anmeldung funktioniert nur über https:// (z. B. GitHub Pages).</p>
+    <ol>
+      <li>Öffne <b>developer.spotify.com/dashboard</b> und erstelle eine App.</li>
+      <li>Trage dort als <b>Redirect URI</b> genau diese Adresse ein:</li>
+    </ol>
+    <div class="uri"><code id="redirectUri"></code><button id="copyBtn">Kopieren</button></div>
+    <ol start="3">
+      <li>Hake <b>Web API</b> an, speichere und kopiere die <b>Client ID</b> hierher.</li>
+    </ol>
+    <div>
+      <label for="clientId">Client ID</label>
+      <input id="clientId" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="32 Zeichen, z. B. 1a2b3c…">
+    </div>
+    <div id="setupMsg"></div>
+    <button class="pill" id="connectBtn">Mit Spotify verbinden</button>
+  </div>
+</div>
+
+<!-- ================= SHEET ================= -->
+<div id="sheet">
+  <div class="panel">
+    <h3>Lautstärke</h3>
+    <div class="vol"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
+      <input type="range" id="volSlider" min="0" max="100" step="1"><span id="volVal">–</span></div>
+    <h3>Geräte</h3>
+    <div id="devList"><p style="color:var(--dim)">Lade…</p></div>
+    <div class="row">
+      <button class="pill ghost" id="fsBtn">Vollbild</button>
+      <button class="pill ghost" id="logoutBtn">Abmelden</button>
+      <button class="pill" id="closeSheet">Schließen</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* =========================================================
+   Einstellungen – hier kannst du die Zeiten anpassen
+   ========================================================= */
+const IDLE_AFTER_MS = 2 * 60 * 1000;   // Uhr-Bildschirm nach 2 Min. ohne Wiedergabe
+const DEEP_AFTER_MS = 30 * 60 * 1000;  // komplett schwarz nach 30 Min. (Display darf ausgehen)
+const SHIFT_EVERY_MS = 2 * 60 * 1000;  // Pixel-Verschiebung gegen Einbrennen
+
+/* ========================================================= */
+const SCOPES = 'user-read-playback-state user-modify-playback-state user-read-currently-playing';
+const REDIRECT = location.origin + location.pathname;
+const API = 'https://api.spotify.com/v1';
+const $ = id => document.getElementById(id);
+
+/* ---------- Speicher (localStorage mit Fallback) ---------- */
+const mem = {};
+const store = {
+  get(k){ try{ const v = localStorage.getItem('dt_'+k); return v === null ? (mem[k] ?? null) : v; }catch(e){ return mem[k] ?? null; } },
+  set(k,v){ if(v == null) delete mem[k]; else mem[k] = String(v);
+    try{ v == null ? localStorage.removeItem('dt_'+k) : localStorage.setItem('dt_'+k, v); }catch(e){} }
+};
+
+/* ---------- Icons ---------- */
+const ICON = {
+  play:  '<path d="M8 5.14v13.72a1 1 0 0 0 1.52.85l10.6-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14z"/>',
+  pause: '<rect x="6" y="4" width="4" height="16" rx="1.2"/><rect x="14" y="4" width="4" height="16" rx="1.2"/>',
+  computer: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  smartphone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
+  speaker: '<rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="14" r="4"/><circle cx="12" cy="6" r="1"/>',
+  tv: '<rect x="2" y="5" width="20" height="13" rx="2"/><path d="M7 21h10"/>'
+};
+function devIcon(type){
+  type = (type||'').toLowerCase();
+  if(type === 'computer') return ICON.computer;
+  if(type === 'smartphone' || type === 'tablet') return ICON.smartphone;
+  if(type === 'tv' || type === 'castvideo') return ICON.tv;
+  return ICON.speaker;
+}
+
+/* ---------- Toast ---------- */
+let toastT;
+function toast(msg){ const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastT); toastT = setTimeout(()=>t.classList.remove('show'), 2200); }
+
+/* =========================================================
+   Anmeldung (OAuth mit PKCE – ohne Client Secret)
+   ========================================================= */
+const auth = {
+  access: store.get('access'),
+  refresh: store.get('refresh'),
+  exp: parseInt(store.get('exp') || '0', 10)
+};
+function saveAuth(){ store.set('access', auth.access); store.set('refresh', auth.refresh); store.set('exp', auth.exp); }
+
+function randStr(n){
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const a = new Uint8Array(n); crypto.getRandomValues(a);
+  return Array.from(a, b => chars[b % chars.length]).join('');
+}
+function b64url(buf){
+  return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+async function login(){
+  const clientId = store.get('client_id');
+  const verifier = randStr(64), stateTok = randStr(16);
+  store.set('verifier', verifier); store.set('oauth_state', stateTok);
+  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  const p = new URLSearchParams({ client_id: clientId, response_type: 'code', redirect_uri: REDIRECT,
+    code_challenge_method: 'S256', code_challenge: challenge, scope: SCOPES, state: stateTok });
+  location.href = 'https://accounts.spotify.com/authorize?' + p.toString();
+}
+async function tokenRequest(params){
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(params)
+  });
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error_description || data.error || ('HTTP ' + res.status));
+  auth.access = data.access_token;
+  auth.exp = Date.now() + (data.expires_in - 60) * 1000;
+  if(data.refresh_token) auth.refresh = data.refresh_token;
+  saveAuth();
+}
+function exchangeCode(code){
+  return tokenRequest({ grant_type: 'authorization_code', code, redirect_uri: REDIRECT,
+    client_id: store.get('client_id'), code_verifier: store.get('verifier') || '' });
+}
+let refreshing = null;
+async function getToken(){
+  if(auth.access && Date.now() < auth.exp) return auth.access;
+  if(!auth.refresh) throw new ApiError(0, 'auth');
+  if(!refreshing){
+    refreshing = tokenRequest({ grant_type: 'refresh_token', refresh_token: auth.refresh, client_id: store.get('client_id') })
+      .catch(e => { auth.access = auth.refresh = null; auth.exp = 0; saveAuth(); throw new ApiError(0, 'auth'); })
+      .finally(() => { refreshing = null; });
+  }
+  await refreshing;
+  return auth.access;
+}
+function logout(){
+  auth.access = auth.refresh = null; auth.exp = 0; saveAuth();
+  closeSheet(); stopPlayer(); showSetup('Abgemeldet.');
+}
+
+/* =========================================================
+   Spotify-API
+   ========================================================= */
+class ApiError extends Error{ constructor(status, msg, reason){ super(msg); this.status = status; this.reason = reason; } }
+let backoffUntil = 0;
+async function api(method, path, body, retry = true){
+  if(Date.now() < backoffUntil) throw new ApiError(429, 'Kurz warten…');
+  const token = await getToken();
+  const headers = { Authorization: 'Bearer ' + token };
+  if(body) headers['Content-Type'] = 'application/json';
+  const res = await fetch(API + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  if(res.status === 401 && retry){ auth.exp = 0; return api(method, path, body, false); }
+  if(res.status === 429){
+    const ra = parseInt(res.headers.get('Retry-After') || '10', 10);
+    backoffUntil = Date.now() + (isNaN(ra) ? 10 : ra + 1) * 1000;
+    throw new ApiError(429, 'Zu viele Anfragen');
+  }
+  const text = await res.text();
+  let data = null; if(text){ try{ data = JSON.parse(text); }catch(e){} }
+  if(!res.ok) throw new ApiError(res.status, (data && data.error && data.error.message) || res.statusText, data && data.error && data.error.reason);
+  return data;
+}
+function handleError(e, silent){
+  if(e && e.message === 'auth'){ stopPlayer(); showSetup('Bitte neu mit Spotify verbinden.'); return; }
+  if(!e || e.status === 429) return;
+  if(e.reason === 'PREMIUM_REQUIRED'){ toast('Dafür ist Spotify Premium nötig'); return; }
+  if(e.reason === 'NO_ACTIVE_DEVICE' || e.status === 404){ if(!silent) toast('Kein aktives Gerät – unten eins wählen'); return; }
+  if(!silent) toast(e.status === 403 ? 'Das geht gerade nicht' : 'Fehler: ' + e.message);
+  console.warn(e);
+}
+
+/* =========================================================
+   Zustand & Anzeige
+   ========================================================= */
+let state = null, lastSync = 0, currentId = null, mode = 'player', lastActive = Date.now();
+let running = false, pollTimer = null;
+
+function curProgress(){
+  if(!state || !state.item) return 0;
+  let p = state.progress_ms || 0;
+  if(state.is_playing) p += performance.now() - lastSync;
+  return Math.max(0, Math.min(p, state.item.duration_ms || 0));
+}
+function syncProgress(){ if(state){ state.progress_ms = curProgress(); lastSync = performance.now(); } }
+function fmt(ms){ const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+
+function applyState(s){
+  state = s; lastSync = performance.now();
+  const hasItem = !!(s && s.item);
+  $('empty').classList.toggle('show', !hasItem);
+  if(!hasItem){ currentId = null; return; }
+
+  const it = s.item, isEp = it.type === 'episode';
+  const title = it.name || '–';
+  const artist = isEp ? (it.show && it.show.name) || '' : (it.artists || []).map(a => a.name).join(', ');
+  const album = isEp ? (it.show && it.show.publisher) || '' : (it.album && it.album.name) || '';
+  const imgs = isEp ? ((it.images && it.images.length) ? it.images : (it.show && it.show.images) || []) : ((it.album && it.album.images) || []);
+  const img = imgs[0] && imgs[0].url;
+
+  if(it.id !== currentId || $('title').textContent !== title){
+    currentId = it.id;
+    $('title').textContent = title; $('artist').textContent = artist; $('album').textContent = album;
+    if(img) setCover(img); else $('cover').style.backgroundImage = 'none';
+  }
+  $('tDur').textContent = fmt(it.duration_ms || 0);
+  renderPlay();
+  $('shuffleBtn').classList.toggle('on', !!s.shuffle_state);
+  const rep = $('repeatBtn');
+  rep.classList.toggle('on', s.repeat_state && s.repeat_state !== 'off');
+  rep.classList.toggle('track', s.repeat_state === 'track');
+  if(s.device){
+    $('deviceName').textContent = s.device.name;
+    $('deviceIcon').innerHTML = devIcon(s.device.type);
+  }
+  if(s.is_playing){ lastActive = Date.now(); if(mode !== 'player') setMode('player'); }
+}
+function renderPlay(){ $('playIcon').innerHTML = state && state.is_playing ? ICON.pause : ICON.play; }
+
+/* Cover laden + Hintergrundfarbe berechnen */
+let coverReq = 0;
+function setCover(url){
+  const req = ++coverReq;
+  const img = new Image(); img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    if(req !== coverReq) return;
+    $('cover').style.backgroundImage = 'url("' + url + '")';
+    const c = avgColor(img);
+    if(c) document.documentElement.style.setProperty('--tint', c.join(','));
+  };
+  img.onerror = () => { if(req === coverReq) $('cover').style.backgroundImage = 'url("' + url + '")'; };
+  img.src = url;
+}
+function avgColor(img){
+  try{
+    const n = 24, c = document.createElement('canvas'); c.width = c.height = n;
+    const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(img, 0, 0, n, n);
+    const d = x.getImageData(0, 0, n, n).data;
+    let r = 0, g = 0, b = 0, w = 0;
+    for(let i = 0; i < d.length; i += 4){
+      const R = d[i], G = d[i+1], B = d[i+2], mx = Math.max(R,G,B), mn = Math.min(R,G,B);
+      const sat = mx ? (mx - mn) / mx : 0, lum = (mx + mn) / 510;
+      const wt = 0.04 + sat * sat * (lum > 0.12 && lum < 0.9 ? 1 : 0.1);
+      r += R * wt; g += G * wt; b += B * wt; w += wt;
+    }
+    r /= w; g /= w; b /= w;
+    const m = Math.max(r, g, b), f = m > 160 ? 160 / m : 1;
+    return [r * f | 0, g * f | 0, b * f | 0];
+  }catch(e){ return null; }
+}
+
+/* =========================================================
+   Abfrage-Schleife (sparsam wegen Spotify-Kontingent)
+   ========================================================= */
+function nextInterval(){
+  if(Date.now() < backoffUntil) return backoffUntil - Date.now() + 300;
+  if(mode === 'deep') return 20000;
+  if(mode === 'idle') return 8000;
+  return state && state.is_playing ? 3000 : 5000;
+}
+function schedulePoll(ms){ clearTimeout(pollTimer); if(running) pollTimer = setTimeout(poll, ms); }
+async function poll(){
+  if(!running || document.hidden) return;
+  try{ applyState(await api('GET', '/me/player?additional_types=episode')); }
+  catch(e){ handleError(e, true); }
+  schedulePoll(nextInterval());
+}
+
+/* =========================================================
+   Steuerung
+   ========================================================= */
+async function cmd(fn){
+  try{ await fn(); }catch(e){ handleError(e); }
+  schedulePoll(700);
+}
+function togglePlay(){
+  if(!state || !state.item) return;
+  syncProgress();
+  const was = state.is_playing; state.is_playing = !was; renderPlay();
+  cmd(() => api('PUT', was ? '/me/player/pause' : '/me/player/play'));
+}
+function animateCover(cls){
+  const c = $('cover'); c.classList.add(cls);
+  setTimeout(() => c.classList.remove(cls), 280);
+}
+function next(){ animateCover('out-left'); cmd(() => api('POST', '/me/player/next')); }
+function prev(){
+  if(curProgress() > 3000){ seek(0); return; }   // wie im Auto: erst an den Anfang
+  animateCover('out-right'); cmd(() => api('POST', '/me/player/previous'));
+}
+function seek(ms){
+  if(!state || !state.item) return;
+  state.progress_ms = ms; lastSync = performance.now();
+  cmd(() => api('PUT', '/me/player/seek?position_ms=' + Math.round(ms)));
+}
+function toggleShuffle(){
+  if(!state) return; const v = !state.shuffle_state; state.shuffle_state = v;
+  $('shuffleBtn').classList.toggle('on', v);
+  cmd(() => api('PUT', '/me/player/shuffle?state=' + v));
+}
+function cycleRepeat(){
+  if(!state) return;
+  const order = ['off', 'context', 'track'];
+  const v = order[(order.indexOf(state.repeat_state || 'off') + 1) % 3]; state.repeat_state = v;
+  $('repeatBtn').classList.toggle('on', v !== 'off'); $('repeatBtn').classList.toggle('track', v === 'track');
+  cmd(() => api('PUT', '/me/player/repeat?state=' + v));
+}
+let volT = null;
+function setVolume(v){
+  v = Math.max(0, Math.min(100, Math.round(v)));
+  if(state && state.device){
+    if(state.device.supports_volume === false){ toast('Dieses Gerät erlaubt keine Lautstärke-Steuerung'); return; }
+    state.device.volume_percent = v;
+  }
+  $('volSlider').value = v; $('volVal').textContent = v + ' %';
+  clearTimeout(volT);
+  volT = setTimeout(() => cmd(() => api('PUT', '/me/player/volume?volume_percent=' + v)), 250);
+}
+
+/* Wischgesten: links/rechts = Titel wechseln, hoch/runter = Lautstärke, Tipp aufs Cover = Play/Pause */
+let ptr = null;
+$('player').addEventListener('pointerdown', e => {
+  if(e.target.closest('button, .prog, #empty')) { ptr = null; return; }
+  ptr = { x: e.clientX, y: e.clientY, t: Date.now(), onCover: !!e.target.closest('#cover') };
+});
+$('player').addEventListener('pointerup', e => {
+  if(!ptr) return;
+  const dx = e.clientX - ptr.x, dy = e.clientY - ptr.y, ax = Math.abs(dx), ay = Math.abs(dy);
+  if(ax > 60 && ax > ay){ dx < 0 ? next() : prev(); }
+  else if(ay > 60 && ay > ax){
+    const cur = state && state.device ? state.device.volume_percent || 0 : 50;
+    const v = cur + (dy < 0 ? 10 : -10); setVolume(v);
+    if(!(state && state.device && state.device.supports_volume === false)) toast('Lautstärke ' + Math.max(0, Math.min(100, v)) + ' %');
+  }
+  else if(ax < 10 && ay < 10 && Date.now() - ptr.t < 400 && ptr.onCover){ togglePlay(); }
+  ptr = null;
+});
+
+$('play').onclick = togglePlay;
+$('nextBtn').onclick = next;
+$('prevBtn').onclick = prev;
+$('shuffleBtn').onclick = toggleShuffle;
+$('repeatBtn').onclick = cycleRepeat;
+$('prog').onclick = e => {
+  if(!state || !state.item) return;
+  const r = $('prog').getBoundingClientRect();
+  seek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * state.item.duration_ms);
+};
+
+/* =========================================================
+   Geräte-Sheet
+   ========================================================= */
+let sheetOpen = false;
+async function openSheet(){
+  sheetOpen = true; $('sheet').classList.add('open');
+  const v = state && state.device ? state.device.volume_percent : null;
+  $('volSlider').value = v ?? 50; $('volVal').textContent = v == null ? '–' : v + ' %';
+  $('devList').innerHTML = '<p style="color:var(--dim)">Lade…</p>';
+  try{
+    const d = await api('GET', '/me/player/devices');
+    const list = (d && d.devices) || [];
+    if(!list.length){ $('devList').innerHTML = '<p style="color:var(--dim)">Keine Geräte gefunden. Öffne Spotify auf deinem PC oder Lautsprecher.</p>'; return; }
+    $('devList').innerHTML = '';
+    list.forEach(dev => {
+      const b = document.createElement('button'); b.className = 'dev' + (dev.is_active ? ' active' : '');
+      b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + devIcon(dev.type) + '</svg>';
+      const t = document.createElement('div'); t.textContent = dev.name;
+      const sm = document.createElement('small'); sm.textContent = dev.is_active ? 'Spielt gerade hier' : dev.type; t.appendChild(sm);
+      b.appendChild(t);
+      b.onclick = () => { closeSheet(); toast('Wechsle zu ' + dev.name + '…');
+        cmd(() => api('PUT', '/me/player', { device_ids: [dev.id], play: true })); };
+      $('devList').appendChild(b);
+    });
+  }catch(e){ handleError(e); $('devList').innerHTML = '<p style="color:var(--dim)">Geräte konnten nicht geladen werden.</p>'; }
+}
+function closeSheet(){ sheetOpen = false; $('sheet').classList.remove('open'); }
+$('deviceBtn').onclick = openSheet;
+$('emptyDevBtn').onclick = openSheet;
+$('moreBtn').onclick = openSheet;
+$('closeSheet').onclick = closeSheet;
+$('sheet').addEventListener('click', e => { if(e.target === $('sheet')) closeSheet(); });
+$('volSlider').oninput = e => setVolume(+e.target.value);
+$('logoutBtn').onclick = logout;
+$('fsBtn').onclick = () => { goFullscreen(); closeSheet(); };
+
+/* =========================================================
+   Vollbild, Bildschirm-wach-halten, Einbrennschutz
+   ========================================================= */
+function goFullscreen(){
+  const el = document.documentElement;
+  if(document.fullscreenElement || !el.requestFullscreen) return;
+  el.requestFullscreen({ navigationUI: 'hide' }).then(() => {
+    try{ screen.orientation.lock('landscape').catch(() => {}); }catch(e){}
+  }).catch(() => {});
+}
+let wakeLock = null;
+async function requestWakeLock(){
+  try{
+    if('wakeLock' in navigator && !wakeLock && !document.hidden){
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
+  }catch(e){}
+}
+function releaseWakeLock(){ try{ wakeLock && wakeLock.release(); }catch(e){} wakeLock = null; }
+
+function setMode(m){
+  if(mode === m) return;
+  mode = m;
+  $('idle').classList.toggle('active', m !== 'player');
+  $('idle').classList.toggle('deep', m === 'deep');
+  if(m === 'deep') releaseWakeLock(); else requestWakeLock();
+  if(m === 'player') schedulePoll(0);
+  if(m === 'idle') moveClock();
+}
+/* Tipp auf Uhr / schwarzen Bildschirm weckt den Player */
+$('idle').addEventListener('pointerdown', e => { e.preventDefault(); lastActive = Date.now(); setMode('player'); });
+/* Jede Berührung im Player zählt als Aktivität; erste Berührung schaltet Vollbild an */
+document.addEventListener('pointerdown', () => {
+  lastActive = Date.now();
+  if(running && mode === 'player' && !sheetOpen) goFullscreen();
+}, true);
+
+const DAYS = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+const MONTHS = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+let lastClock = '';
+function updateClock(){
+  const d = new Date();
+  const t = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  if(t !== lastClock){
+    lastClock = t; $('clock').textContent = t;
+    $('date').textContent = DAYS[d.getDay()] + ', ' + d.getDate() + '. ' + MONTHS[d.getMonth()];
+    if(mode === 'idle') moveClock();     // jede Minute an neue Stelle
+  }
+}
+function moveClock(){
+  const w = $('clockWrap'), W = innerWidth, H = innerHeight;
+  const cw = w.offsetWidth || 300, ch = w.offsetHeight || 150;
+  const x = Math.random() * Math.max(0, W - cw - 40) + 20, y = Math.random() * Math.max(0, H - ch - 40) + 20;
+  w.style.transform = 'translate(' + x + 'px,' + y + 'px)';
+}
+let lastShift = Date.now();
+function tick(){
+  // Fortschritt
+  if(state && state.item){
+    const p = curProgress();
+    $('fill').style.width = (p / state.item.duration_ms * 100) + '%';
+    $('tCur').textContent = fmt(p);
+  }
+  // Ruhemodus
+  if(running){
+    if((state && state.is_playing) || sheetOpen) lastActive = Math.max(lastActive, Date.now() - 1);
+    const since = Date.now() - lastActive;
+    if(mode === 'player' && since > IDLE_AFTER_MS) setMode('idle');
+    else if(mode === 'idle' && since > DEEP_AFTER_MS) setMode('deep');
+  }
+  updateClock();
+  // kleine Pixel-Verschiebung gegen Einbrennen
+  if(Date.now() - lastShift > SHIFT_EVERY_MS){
+    lastShift = Date.now();
+    $('shift').style.transform = 'translate(' + (Math.random() * 12 - 6).toFixed(1) + 'px,' + (Math.random() * 12 - 6).toFixed(1) + 'px)';
+  }
+}
+setInterval(tick, 250);
+
+document.addEventListener('visibilitychange', () => {
+  if(!running) return;
+  if(document.hidden){ clearTimeout(pollTimer); }
+  else{ if(mode !== 'deep') requestWakeLock(); schedulePoll(0); }
+});
+
+/* =========================================================
+   Bildschirme
+   ========================================================= */
+function showSetup(msg){
+  $('setup').classList.add('active'); $('player').classList.remove('active');
+  $('setupMsg').textContent = msg || '';
+  $('clientId').value = store.get('client_id') || '';
+}
+function startPlayer(){
+  $('setup').classList.remove('active'); $('player').classList.add('active');
+  running = true; mode = 'player'; lastActive = Date.now();
+  requestWakeLock(); schedulePoll(0);
+}
+function stopPlayer(){ running = false; clearTimeout(pollTimer); setMode('player'); $('idle').classList.remove('active'); }
+
+$('redirectUri').textContent = REDIRECT;
+if(!window.isSecureContext) $('secureWarn').style.display = 'block';
+$('copyBtn').onclick = async () => {
+  try{ await navigator.clipboard.writeText(REDIRECT); toast('Kopiert'); }
+  catch(e){ const r = document.createRange(); r.selectNodeContents($('redirectUri'));
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r); toast('Markiert – jetzt kopieren'); }
+};
+$('connectBtn').onclick = () => {
+  const id = $('clientId').value.trim();
+  if(!/^[0-9a-f]{32}$/i.test(id)){ $('setupMsg').textContent = 'Die Client ID besteht aus 32 Zeichen (0–9, a–f).'; return; }
+  if(!window.isSecureContext){ $('setupMsg').textContent = 'Die Seite muss über https:// laufen.'; return; }
+  store.set('client_id', id); login();
+};
+
+/* =========================================================
+   Start
+   ========================================================= */
+(async function init(){
+  renderPlay();
+  const p = new URLSearchParams(location.search);
+  if(p.get('error')){ history.replaceState(null, '', REDIRECT); showSetup('Anmeldung abgebrochen (' + p.get('error') + ').'); return; }
+  if(p.get('code')){
+    const ok = p.get('state') === store.get('oauth_state');
+    history.replaceState(null, '', REDIRECT);
+    if(!ok){ showSetup('Anmeldung ungültig, bitte nochmal versuchen.'); return; }
+    try{ await exchangeCode(p.get('code')); }
+    catch(e){ showSetup('Anmeldung fehlgeschlagen: ' + e.message); return; }
+    store.set('verifier', null); store.set('oauth_state', null);
+  }
+  if(store.get('client_id') && (auth.refresh || auth.access)) startPlayer(); else showSetup();
+})();
+</script>
+</body>
+</html>
